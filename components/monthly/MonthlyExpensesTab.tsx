@@ -42,7 +42,8 @@ export const MonthlyExpensesTab: React.FC<MonthlyExpensesTabProps> = ({
   onSaveExpenses,
   initialData
 }) => {
-  // Initialize state
+  // Initialize state lazily from initialData to prevent re-render loops and flickering.
+  // If initialData is present, use it. Otherwise use defaults.
   const [em2Value, setEm2Value] = useState<string>(() => {
     if (initialData?.expenses?.saved_em2_eur !== undefined) {
       return initialData.expenses.saved_em2_eur.toString();
@@ -78,29 +79,7 @@ export const MonthlyExpensesTab: React.FC<MonthlyExpensesTabProps> = ({
   // Refs to track previous values to avoid infinite save loops
   const prevDataRef = useRef<string>('');
 
-  // BUG FIX: Sync local state when initialData loads from localStorage
-  useEffect(() => {
-    if (initialData?.expenses) {
-      // Sync additional expenses if they exist in the loaded data
-      if (initialData.expenses.additional_expenses) {
-        setExpenses(initialData.expenses.additional_expenses);
-      }
-      
-      // Sync fixed expenses if they exist
-      if (initialData.expenses.fixed_expenses) {
-        setCredit(initialData.expenses.fixed_expenses.credit_eur?.toString() || DEFAULT_CREDIT_EUR);
-        setPhone(initialData.expenses.fixed_expenses.phone_eur?.toString() || DEFAULT_PHONE_EUR);
-        setInternet(initialData.expenses.fixed_expenses.internet_eur?.toString() || DEFAULT_INTERNET_EUR);
-      }
-
-      // Sync saved electricity if exists
-      if (initialData.expenses.saved_em2_eur !== undefined) {
-        setEm2Value(initialData.expenses.saved_em2_eur.toString());
-      }
-    }
-  }, [initialData]);
-
-  // Sync EM2 value only if it changes externally via the Save button in Electricity Tab
+  // Sync EM2 value only if it changes externally and is different
   useEffect(() => {
     if (savedEm2Value !== null && savedEm2Value !== undefined) {
       const newVal = savedEm2Value.toFixed(2);
