@@ -15,13 +15,10 @@ import { SavingsTab } from "@components/savings/SavingsTab";
 import { getCurrentMonthBulgarian } from "@utils/formatting";
 import { MonthlyRecord, IncomeItem } from "@types";
 
-// ---------------------------
-// STORAGE KEYS
-// ---------------------------
+type Tab = "monthly" | "electricity" | "reports" | "savings";
+
 const STORAGE_KEY_MONTHLY = "HomeBudget_Data";
 const STORAGE_KEY_SAVINGS = "HomeBudget_GlobalSavings";
-
-type Tab = "monthly" | "electricity" | "reports" | "savings";
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>("monthly");
@@ -32,12 +29,11 @@ const App: React.FC = () => {
   >({});
   const [globalSavings, setGlobalSavings] = useState<IncomeItem[]>([]);
 
-  // ---------------------------
-  // LOAD FROM LOCALSTORAGE
-  // ---------------------------
+  //
+  // LOAD FROM STORAGE
+  //
   useEffect(() => {
-    const month = getCurrentMonthBulgarian();
-    setCurrentMonth(month);
+    setCurrentMonth(getCurrentMonthBulgarian());
 
     try {
       const stored = localStorage.getItem(STORAGE_KEY_MONTHLY);
@@ -50,7 +46,7 @@ const App: React.FC = () => {
       const saved = localStorage.getItem(STORAGE_KEY_SAVINGS);
       if (saved) setGlobalSavings(JSON.parse(saved));
     } catch (e) {
-      console.error("Failed to load savings data", e);
+      console.error("Failed to load savings", e);
     }
   }, []);
 
@@ -62,42 +58,41 @@ const App: React.FC = () => {
     localStorage.setItem(STORAGE_KEY_SAVINGS, JSON.stringify(updated));
   };
 
-  // ======================================================
-  // ELECTRICITY SAVE — MERGES, DOES NOT OVERWRITE ANYTHING
-  // ======================================================
+  //
+  // SAVE ELECTRICITY (EM2)
+  // НЕ ПРЕЗАПИСВА НИЩО!
+  //
   const handleSaveElectricity = useCallback(
     (em2Amount: number, record: MonthlyRecord) => {
       setMonthlyData((prev) => {
         const monthKey = record.month;
-
-        const existing = prev[monthKey] || {
-          month: monthKey,
-          expenses: {
-            fixed_expenses: {},
-            additional_expenses: [],
-            saved_em2_eur: 0,
-          },
-          incomes: [],
-          results: {},
-          inputs: {},
-          meta: { generated_at: new Date().toISOString() },
-        };
+        const existing = prev[monthKey] || { month: monthKey };
 
         const updated: MonthlyRecord = {
           ...existing,
           ...record,
           expenses: {
-            ...existing.expenses,
-            ...record.expenses,
+            ...(existing.expenses || {}),
+            ...(record.expenses || {}),
+
             saved_em2_eur: em2Amount,
+
             fixed_expenses: {
               ...(existing.expenses?.fixed_expenses || {}),
-              ...(record.expenses?.fixed_expenses || {}),
             },
+
             additional_expenses: [
               ...(existing.expenses?.additional_expenses || []),
             ],
           },
+
+          incomes: existing.incomes || [],
+          results: existing.results || {},
+          inputs: existing.inputs || {},
+          meta:
+            existing.meta || {
+              generated_at: new Date().toISOString(),
+            },
         };
 
         const newData = { ...prev, [monthKey]: updated };
@@ -108,61 +103,43 @@ const App: React.FC = () => {
     []
   );
 
-  // ======================================================
-  // MONTHLY EXPENSES SAVE — **FIXED**, **MERGED**, **SAFE**
-  // ======================================================
+  //
+  // SAVE EXPENSES — MERGE + НЕ ПРЕЗАПИСВА НИЩО
+  //
   const handleSaveExpenses = useCallback((expensesData: any) => {
     setMonthlyData((prev) => {
       const monthKey = getCurrentMonthBulgarian();
-
-      // Пълен fallback за да няма липсващи части
-      const existing = prev[monthKey] || {
-        month: monthKey,
-        expenses: {
-          fixed_expenses: {},
-          additional_expenses: [],
-          saved_em2_eur: 0,
-        },
-        incomes: [],
-        results: {},
-        inputs: {},
-        meta: { generated_at: new Date().toISOString() },
-      };
+      const existing = prev[monthKey] || { month: monthKey };
 
       const updated: MonthlyRecord = {
         ...existing,
 
         expenses: {
-          ...existing.expenses,
+          ...(existing.expenses || {}),
 
-          // ============ FIXED EXPENSES MERGE ============
           fixed_expenses: {
-            ...(existing.expenses.fixed_expenses || {}),
+            ...(existing.expenses?.fixed_expenses || {}),
             ...(expensesData.fixed_expenses || {}),
           },
 
-          // ============ ADDITIONAL EXPENSES (NO OVERWRITE) ============
-          additional_expenses:
-            expensesData.additional_expenses ??
-            existing.expenses.additional_expenses ??
-            [],
+          additional_expenses: [
+            ...(existing.expenses?.additional_expenses || []),
+            ...(expensesData.additional_expenses || []),
+          ],
 
           saved_em2_eur:
             expensesData.saved_em2_eur ??
-            existing.expenses.saved_em2_eur ??
-            0,
+            existing.expenses?.saved_em2_eur ??
+            null,
         },
 
         incomes: existing.incomes || [],
         results: existing.results || {},
         inputs: existing.inputs || {},
-
-        meta: {
-          ...(existing.meta || {}),
-          generated_at:
-            existing.meta?.generated_at ||
-            new Date().toISOString(),
-        },
+        meta:
+          existing.meta || {
+            generated_at: new Date().toISOString(),
+          },
       };
 
       const newData = { ...prev, [monthKey]: updated };
@@ -171,9 +148,9 @@ const App: React.FC = () => {
     });
   }, []);
 
-  // ======================================================
-  // SAVINGS SAVE
-  // ======================================================
+  //
+  // SAVINGS
+  //
   const handleUpdateGlobalSavings = useCallback((newSavings: IncomeItem[]) => {
     setGlobalSavings(newSavings);
     saveSavings(newSavings);
@@ -181,11 +158,9 @@ const App: React.FC = () => {
 
   const currentMonthRecord = monthlyData[currentMonth];
 
-  // ======================================================
-  // UI
-  // ======================================================
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
+      {/* HEADER */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
@@ -251,6 +226,7 @@ const App: React.FC = () => {
         </div>
       </header>
 
+      {/* MAIN CONTENT */}
       <main className="flex-1 max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
         {activeTab === "monthly" && (
           <MonthlyExpensesTab
@@ -277,6 +253,7 @@ const App: React.FC = () => {
         )}
       </main>
 
+      {/* FOOTER */}
       <footer className="bg-white border-t border-slate-200 mt-auto">
         <div className="max-w-6xl mx-auto px-4 py-6">
           <p className="text-center text-xs text-slate-400">
