@@ -249,4 +249,3 @@ const App: React.FC = () => {
 
 export default App;
 
-ето го моя, поправи го и ми го върни целия
