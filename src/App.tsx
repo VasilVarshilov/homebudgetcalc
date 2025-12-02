@@ -34,7 +34,8 @@ const App: React.FC = () => {
 
   // Load stored data
   useEffect(() => {
-    setCurrentMonth(getCurrentMonthBulgarian());
+    const month = getCurrentMonthBulgarian();
+    setCurrentMonth(month);
 
     try {
       const storedMonthly = localStorage.getItem(STORAGE_KEY_MONTHLY);
@@ -92,44 +93,47 @@ const App: React.FC = () => {
     []
   );
 
-  // Monthly Expenses Save
-  const handleSaveExpenses = useCallback((expensesData: any) => {
-    setMonthlyData((prev) => {
-      const monthKey = getCurrentMonthBulgarian();
+  // Monthly Expenses Save (FIXED: now uses currentMonth)
+  const handleSaveExpenses = useCallback(
+    (expensesData: any) => {
+      setMonthlyData((prev) => {
+        const monthKey = currentMonth;
 
-      const existing = prev[monthKey] || {
-        month: monthKey,
-        tab: "expenses",
-        meta: { generated_at: new Date().toISOString() },
-        inputs: {
-          old_t1: 0,
-          new_t1: 0,
-          old_t2: 0,
-          new_t2: 0,
-          day_price_with_vat: 0,
-          night_price_with_vat: 0,
-          invoice_total: 0,
-        },
-        results: {
-          cons_t1_kwh: 0,
-          cons_t2_kwh: 0,
-          total_cons_em1_kwh: 0,
-          cost_em1_eur: 0,
-          em2_remainder_eur: 0,
-        },
-      };
+        const existing = prev[monthKey] || {
+          month: monthKey,
+          tab: "expenses",
+          meta: { generated_at: new Date().toISOString() },
+          inputs: {
+            old_t1: 0,
+            new_t1: 0,
+            old_t2: 0,
+            new_t2: 0,
+            day_price_with_vat: 0,
+            night_price_with_vat: 0,
+            invoice_total: 0,
+          },
+          results: {
+            cons_t1_kwh: 0,
+            cons_t2_kwh: 0,
+            total_cons_em1_kwh: 0,
+            cost_em1_eur: 0,
+            em2_remainder_eur: 0,
+          },
+        };
 
-      const updated: MonthlyRecord = {
-        ...existing,
-        expenses: expensesData,
-        incomes: existing.incomes || [],
-      };
+        const updated: MonthlyRecord = {
+          ...existing,
+          expenses: expensesData,
+          incomes: existing.incomes || [],
+        };
 
-      const newData = { ...prev, [monthKey]: updated };
-      saveMonthlyToStorage(newData);
-      return newData;
-    });
-  }, []);
+        const newData = { ...prev, [monthKey]: updated };
+        saveMonthlyToStorage(newData);
+        return newData;
+      });
+    },
+    [currentMonth]
+  );
 
   // Global Savings Save
   const handleUpdateGlobalSavings = useCallback(
