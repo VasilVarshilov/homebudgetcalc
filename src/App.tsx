@@ -22,60 +22,155 @@ const STORAGE_KEY_MONTHLY = "HomeBudget_Data";
 const STORAGE_KEY_SAVINGS = "HomeBudget_GlobalSavings";
 
 /**
- * Helper: stable month id for storage (YYYY-MM).
- * Use this as the canonical key for months so we avoid mismatched human-readable strings.
+ * Bulgarian month name variants to month index (0-based).
+ * Covers common Bulgarian month names/abbreviations that might appear in legacy keys.
  */
-const getMonthId = (d = new Date()) => {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  return `${y}-${m}`;
+const BG_MONTHS: Record<string, number> = {
+  "януари": 0, "яну": 0, "ян": 0,
+  "февруари": 1, "фев": 1,
+  "март": 2, "мар": 2,
+  "април": 3, "апр": 3,
+  "май": 4,
+  "юни": 5,
+  "юли": 6,
+  "август": 7, "авг": 7,
+  "септември": 8, "сеп": 8,
+  "октомври": 9, "окт": 9,
+  "ноември": 10, "ное": 10,
+  "декември": 11, "дек": 11
 };
+
+const pad2 = (n: number) => String(n).padStart(2, "0");
+const getMonthIdFromDate = (d = new Date()) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+
+/**
+ * Try to convert a legacy key (e.g. "Декември 2025" or "December 2025") to YYYY-MM.
+ * If cannot parse, returns null.
+ */
+function tryParseMonthKeyToId(key: string): string | null {
+  if (!key) return null;
+  key = key.trim();
+
+  // If already in YYYY-MM format
+  if (/^\d{4}-\d{2}$/.test(key)) return key;
+
+  // Try to find year
+  const yearMatch = key.match(/(20\d{2}|19\d{2})/);
+  const year = yearMatch ? parseInt(yearMatch[0], 10) : null;
+
+  // find month name in Bulgarian map (case-insensitive)
+  const lower = key.toLowerCase();
+  for (const [name, idx] of Object.entries(BG_MONTHS)) {
+    if (lower.includes(name)) {
+      if (year) {
+        return `${year}-${pad2(idx + 1)}`;
+      } else {
+        // no year present — use current year as fallback
+        const y = new Date().getFullYear();
+        return `${y}-${pad2(idx + 1)}`;
+      }
+    }
+  }
+
+  // try English month names (simple)
+  const english = [
+    "january","february","march","april","may","june","july","august","september","october","november","december"
+  ];
+  for (let i=0;i<english.length;i++){
+    if (lower.includes(english[i])) {
+      const y = year ?? new Date().getFullYear();
+      return `${y}-${pad2(i+1)}`;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Normalize stored monthly data keys into canonical format { "YYYY-MM": MonthlyRecord }.
+ * Preserves all nested content.
+ */
+function normalizeStoredMonthlyData(raw: any): Record<string, MonthlyRecord> {
+  if (!raw || typeof raw !== "object") return {};
+
+  // if already looks like correct mapping (all keys are YYYY-MM) return as-is
+  const allKeys = Object.keys(raw);
+  const looksCanonical = allKeys.length > 0 && allKeys.every(k => /^\d{4}-\d{2}$/.test(k));
+  if (looksCanonical) {
+    return raw as Record<string, MonthlyRecord>;
+  }
+
+  // otherwise, try to map each legacy key to a YYYY-MM; if fail, store under legacy-<index>
+  const out: Record<string, MonthlyRecord> = {};
+  let legacyIdx = 0;
+  for (const key of Object.keys(raw)) {
+    const val = raw[key];
+    const monthId = tryParseMonthKeyToId(key);
+    if (monthId) {
+      out[monthId] = val;
+    } else {
+      // ensure uniqueness
+      const id = `legacy-${pad2(legacyIdx)}`;
+      out[id] = val;
+      legacyIdx++;
+    }
+  }
+  return out;
+}
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>("monthly");
 
-  // human-readable display (Български), used only for UI labels
+  // display month name (BG) for UI
   const [currentMonthDisplay, setCurrentMonthDisplay] = useState<string>("");
+  // canonical month id (YYYY-MM) used as key in storage
+  const [currentMonthId, setCurrentMonthId] = useState<string>(getMonthIdFromDate());
 
-  // canonical month id for storage (YYYY-MM)
-  const [currentMonthId, setCurrentMonthId] = useState<string>(getMonthId());
-
-  // all months data stored as { "2025-12": MonthlyRecord, ... }
-  const [monthlyData, setMonthlyData] = useState<Record<string, MonthlyRecord>>(
-    {}
-  );
-
-  // global lifetime savings (not per-month)
+  const [monthlyData, setMonthlyData] = useState<Record<string, MonthlyRecord>>({});
   const [globalSavings, setGlobalSavings] = useState<IncomeItem[]>([]);
 
-  // Load once on mount
+  // on mount: load & migrate if necessary
   useEffect(() => {
     setCurrentMonthDisplay(getCurrentMonthBulgarian());
-    setCurrentMonthId(getMonthId());
+    setCurrentMonthId(getMonthIdFromDate());
 
     try {
       const raw = localStorage.getItem(STORAGE_KEY_MONTHLY);
       if (raw) {
-        const parsed = JSON.parse(raw) as Record<string, MonthlyRecord>;
-        // Safety: ensure parsed is an object
-        if (parsed && typeof parsed === "object") {
-          setMonthlyData(parsed);
+        const parsed = JSON.parse(raw);
+        const normalized = normalizeStoredMonthlyData(parsed);
+        // If normalization changed keys, we re-save normalized structure (safe, non-destructive)
+        // Compare keys: if any non-canonical keys existed, we will write back normalized.
+        const hadNonCanonical = Object.keys(parsed).some(k => !/^\d{4}-\d{2}$/.test(k));
+        setMonthlyData(normalized);
+        if (hadNonCanonical) {
+          try {
+            localStorage.setItem(STORAGE_KEY_MONTHLY, JSON.stringify(normalized));
+          } catch (e) {
+            console.warn("Could not overwrite normalized monthly data to localStorage", e);
+          }
         }
+      } else {
+        setMonthlyData({});
       }
     } catch (e) {
-      console.error("Failed to parse monthly data from localStorage", e);
+      console.error("Failed to load or parse HomeBudget_Data", e);
+      setMonthlyData({});
     }
 
     try {
-      const rawS = localStorage.getItem(STORAGE_KEY_SAVINGS);
-      if (rawS) {
-        const parsedS = JSON.parse(rawS) as IncomeItem[];
+      const s = localStorage.getItem(STORAGE_KEY_SAVINGS);
+      if (s) {
+        const parsedS = JSON.parse(s);
         if (Array.isArray(parsedS)) {
           setGlobalSavings(parsedS);
+        } else {
+          setGlobalSavings([]);
         }
       }
     } catch (e) {
-      console.error("Failed to parse savings data from localStorage", e);
+      console.error("Failed to load savings", e);
+      setGlobalSavings([]);
     }
   }, []);
 
@@ -91,101 +186,38 @@ const App: React.FC = () => {
     try {
       localStorage.setItem(STORAGE_KEY_SAVINGS, JSON.stringify(updated));
     } catch (e) {
-      console.error("Failed to save savings data", e);
+      console.error("Failed to save savings", e);
     }
   }, []);
 
-  /**
-   * Handle saving electricity results (called from ElectricityTab).
-   * We receive em2Amount and a record (should contain month info).
-   * We merge safely into the month record and do NOT clobber other fields.
-   */
+  // Electricity save: merge safely, DO NOT overwrite additional_expenses unless explicitly provided elsewhere
   const handleSaveElectricity = useCallback(
     (em2Amount: number, record: MonthlyRecord) => {
-      // choose canonical month id: prefer record.monthId if provided, otherwise currentMonthId
-      const monthKey = (record && (record.month as string)) || currentMonthId;
+      const monthKey = record?.month || currentMonthId;
 
-      setMonthlyData((prev) => {
-        const existing = prev[monthKey] || ({ month: monthKey } as MonthlyRecord);
-
-        const updated: MonthlyRecord = {
-          ...existing,
-          // keep any existing meta/inputs/results and merge with record
-          meta: existing.meta || record.meta || {},
-          inputs: {
-            ...(existing.inputs || {}),
-            ...(record.inputs || {}),
-          },
-          results: {
-            ...(existing.results || {}),
-            ...(record.results || {}),
-          },
-          // expenses: merge but ensure we preserve additional_expenses array unless new provided
-          expenses: {
-            ...(existing.expenses || {}),
-            ...(record.expenses || {}),
-            saved_em2_eur:
-              typeof em2Amount === "number" ? em2Amount : existing.expenses?.saved_em2_eur || 0,
-            fixed_expenses: {
-              ...(existing.expenses?.fixed_expenses || {}),
-              ...(record.expenses?.fixed_expenses || {}),
-            },
-            // NOTE: do not auto-append here — we keep existing.additional_expenses unless explicit update from monthly tab
-            additional_expenses: existing.expenses?.additional_expenses || [],
-          },
-          incomes: existing.incomes || [],
-        };
-
-        const newData = { ...prev, [monthKey]: updated };
-        saveMonthly(newData);
-        return newData;
-      });
-    },
-    [currentMonthId, saveMonthly]
-  );
-
-  /**
-   * Handle saving monthly expenses (from MonthlyExpensesTab).
-   * MonthlyExpensesTab will provide full object { saved_em2_eur, fixed_expenses, additional_expenses }.
-   * We REPLACE additional_expenses for that month with the provided array (because the tab manages the full array).
-   * We merge fixed_expenses so we don't lose other fields.
-   */
-  const handleSaveExpenses = useCallback(
-    (expensesData: any) => {
-      const monthKey = currentMonthId;
-
-      setMonthlyData((prev) => {
+      setMonthlyData(prev => {
         const existing = prev[monthKey] || ({ month: monthKey } as MonthlyRecord);
 
         const updated: MonthlyRecord = {
           ...existing,
           month: monthKey,
-          meta: existing.meta || { generated_at: new Date().toISOString() },
-          inputs: existing.inputs || {},
-          results: existing.results || {},
-          incomes: existing.incomes || [],
+          meta: existing.meta || record.meta || {},
+          inputs: { ...(existing.inputs || {}), ...(record.inputs || {}) },
+          results: { ...(existing.results || {}), ...(record.results || {}) },
 
           expenses: {
             ...(existing.expenses || {}),
-
-            // fixed_expenses: merge values (new ones override existing)
+            ...(record.expenses || {}),
+            saved_em2_eur: typeof em2Amount === "number" ? em2Amount : existing.expenses?.saved_em2_eur ?? 0,
             fixed_expenses: {
               ...(existing.expenses?.fixed_expenses || {}),
-              ...(expensesData.fixed_expenses || {}),
+              ...(record.expenses?.fixed_expenses || {}),
             },
-
-            // additional_expenses: replace with the array coming from the tab (no append)
-            additional_expenses:
-              Array.isArray(expensesData.additional_expenses)
-                ? expensesData.additional_expenses
-                : existing.expenses?.additional_expenses || [],
-
-            // saved_em2_eur if provided in the payload, use it, else keep existing
-            saved_em2_eur:
-              typeof expensesData.saved_em2_eur === "number"
-                ? expensesData.saved_em2_eur
-                : existing.expenses?.saved_em2_eur ?? null,
+            // keep existing additional_expenses unless an explicit replacement happens from Monthly tab
+            additional_expenses: existing.expenses?.additional_expenses || [],
           },
+
+          incomes: existing.incomes || [],
         };
 
         const newData = { ...prev, [monthKey]: updated };
@@ -196,13 +228,52 @@ const App: React.FC = () => {
     [currentMonthId, saveMonthly]
   );
 
-  const handleUpdateGlobalSavings = useCallback(
-    (newSavings: IncomeItem[]) => {
-      setGlobalSavings(newSavings);
-      saveSavings(newSavings);
-    },
-    [saveSavings]
-  );
+  // Monthly expenses save: the MonthlyExpensesTab manages the full additional_expenses array,
+  // so here we REPLACE with the provided array (no accidental append).
+  const handleSaveExpenses = useCallback((expensesData: any) => {
+    const monthKey = currentMonthId;
+
+    setMonthlyData(prev => {
+      const existing = prev[monthKey] || ({ month: monthKey } as MonthlyRecord);
+
+      const updated: MonthlyRecord = {
+        ...existing,
+        month: monthKey,
+        meta: existing.meta || { generated_at: new Date().toISOString() },
+        inputs: existing.inputs || {},
+        results: existing.results || {},
+        incomes: existing.incomes || [],
+
+        expenses: {
+          ...(existing.expenses || {}),
+
+          fixed_expenses: {
+            ...(existing.expenses?.fixed_expenses || {}),
+            ...(expensesData.fixed_expenses || {}),
+          },
+
+          // REPLACE additional_expenses with the array provided by the tab
+          additional_expenses: Array.isArray(expensesData.additional_expenses)
+            ? expensesData.additional_expenses
+            : existing.expenses?.additional_expenses || [],
+
+          saved_em2_eur:
+            typeof expensesData.saved_em2_eur === "number"
+              ? expensesData.saved_em2_eur
+              : existing.expenses?.saved_em2_eur ?? null,
+        },
+      };
+
+      const newData = { ...prev, [monthKey]: updated };
+      saveMonthly(newData);
+      return newData;
+    });
+  }, [currentMonthId, saveMonthly]);
+
+  const handleUpdateGlobalSavings = useCallback((newSavings: IncomeItem[]) => {
+    setGlobalSavings(newSavings);
+    saveSavings(newSavings);
+  }, [saveSavings]);
 
   const currentMonthRecord = monthlyData[currentMonthId];
 
@@ -288,7 +359,6 @@ const App: React.FC = () => {
             onSaveEm2={(em2Amount: number, rec: MonthlyRecord) =>
               handleSaveElectricity(em2Amount, {
                 ...rec,
-                // ensure record.month uses canonical monthId if possible
                 month: rec?.month || currentMonthId,
               })
             }
