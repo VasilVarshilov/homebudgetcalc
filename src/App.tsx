@@ -56,7 +56,7 @@ const App: React.FC = () => {
     localStorage.setItem(STORAGE_KEY_SAVINGS, JSON.stringify(updated));
   };
 
-  // 🔧 FIXED — НЕ ГУБИ ДАННИ!
+  // ==========  ELECTRICITY SAVE  ==========
   const handleSaveElectricity = useCallback(
     (em2Amount: number, record: MonthlyRecord) => {
       setMonthlyData((prev) => {
@@ -70,14 +70,12 @@ const App: React.FC = () => {
             ...existing.expenses,
             ...record.expenses,
             saved_em2_eur: em2Amount,
-            fixed_expenses:
-              existing.expenses?.fixed_expenses || {
-                credit_eur: 0,
-                phone_eur: 0,
-                internet_eur: 0,
-              },
-            additional_expenses:
-              existing.expenses?.additional_expenses || [],
+            fixed_expenses: {
+              ...(existing.expenses?.fixed_expenses || {}),
+            },
+            additional_expenses: [
+              ...(existing.expenses?.additional_expenses || []),
+            ],
           },
           incomes: existing.incomes || [],
         };
@@ -90,18 +88,39 @@ const App: React.FC = () => {
     []
   );
 
-  // 🔧 FIXED — НЕ ГУБИ ТОК, ДОХОДИ, REPORTS, НИЩО!
+  // ==========  EXPENSES SAVE — FIXED & GUARANTEED MERGE  ==========
   const handleSaveExpenses = useCallback((expensesData: any) => {
     setMonthlyData((prev) => {
       const monthKey = getCurrentMonthBulgarian();
+
       const existing = prev[monthKey] || { month: monthKey };
 
       const updated: MonthlyRecord = {
         ...existing,
+
         expenses: {
-          ...existing.expenses,
-          ...expensesData,
+          // старите разходи
+          ...(existing.expenses || {}),
+
+          // FIXED EXPENSES MERGE
+          fixed_expenses: {
+            ...(existing.expenses?.fixed_expenses || {}),
+            ...(expensesData.fixed_expenses || {}),
+          },
+
+          // ADDITIONAL EXPENSES MERGE (СПАСЕНИ!)
+          additional_expenses: [
+            ...(existing.expenses?.additional_expenses || []),
+            ...(expensesData.additional_expenses || []),
+          ],
+
+          // saved_em2_eur ако идва от текущия месец, пазим го
+          saved_em2_eur:
+            expensesData.saved_em2_eur ??
+            existing.expenses?.saved_em2_eur ??
+            null,
         },
+
         incomes: existing.incomes || [],
         results: existing.results || {},
         inputs: existing.inputs || {},
