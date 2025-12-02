@@ -365,3 +365,4 @@ export const MonthlyExpensesTab: React.FC<MonthlyExpensesTabProps> = ({
     </div>
   );
 };
+
