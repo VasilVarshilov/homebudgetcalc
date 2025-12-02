@@ -5,11 +5,22 @@ import path from "path";
 export default defineConfig({
   plugins: [react()],
   base: "/homebudgetcalc/",
+
   resolve: {
     alias: {
       "@components": path.resolve(__dirname, "components"),
       "@utils": path.resolve(__dirname, "utils"),
       "@types": path.resolve(__dirname, "types"),
     },
+  },
+
+  build: {
+    sourcemap: false,
+    emptyOutDir: true,
+  },
+
+  server: {
+    strictPort: true,
+    port: 5173,
   },
 });
