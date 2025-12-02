@@ -7,51 +7,52 @@ import {
   PiggyBank,
 } from "lucide-react";
 
-// Components (root-level)
 import { ElectricityTab } from "@components/electricity/ElectricityTab";
 import { MonthlyExpensesTab } from "@components/monthly/MonthlyExpensesTab";
 import { MonthlyReportsTab } from "@components/reports/MonthlyReportsTab";
 import { SavingsTab } from "@components/savings/SavingsTab";
 
-// Utils & Types
 import { getCurrentMonthBulgarian } from "@utils/formatting";
 import { MonthlyRecord, IncomeItem } from "@types";
 
-type Tab = "monthly" | "electricity" | "reports" | "savings";
-
-// Storage Keys
+// STORAGE KEYS
 const STORAGE_KEY_MONTHLY = "HomeBudget_Data";
 const STORAGE_KEY_SAVINGS = "HomeBudget_GlobalSavings";
+
+type Tab = "monthly" | "electricity" | "reports" | "savings";
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>("monthly");
   const [currentMonth, setCurrentMonth] = useState("");
 
-  const [monthlyData, setMonthlyData] = useState<
-    Record<string, MonthlyRecord>
-  >({});
-  const [globalSavings, setGlobalSavings] = useState<IncomeItem[]>([]);
+  // ✅ Load monthly data synchronously BEFORE render
+  const [monthlyData, setMonthlyData] = useState<Record<string, MonthlyRecord>>(
+    () => {
+      try {
+        const stored = localStorage.getItem(STORAGE_KEY_MONTHLY);
+        return stored ? JSON.parse(stored) : {};
+      } catch {
+        return {};
+      }
+    }
+  );
 
-  // Load stored data
+  // ✅ Load global savings synchronously BEFORE render
+  const [globalSavings, setGlobalSavings] = useState<IncomeItem[]>(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY_SAVINGS);
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Load current month one time
   useEffect(() => {
     setCurrentMonth(getCurrentMonthBulgarian());
-
-    try {
-      const storedMonthly = localStorage.getItem(STORAGE_KEY_MONTHLY);
-      if (storedMonthly) setMonthlyData(JSON.parse(storedMonthly));
-    } catch (e) {
-      console.error("Failed to load monthly data", e);
-    }
-
-    try {
-      const storedSavings = localStorage.getItem(STORAGE_KEY_SAVINGS);
-      if (storedSavings) setGlobalSavings(JSON.parse(storedSavings));
-    } catch (e) {
-      console.error("Failed to load savings data", e);
-    }
   }, []);
 
-  // Save helpers
+  // Save functions
   const saveMonthlyToStorage = (updated: Record<string, MonthlyRecord>) => {
     localStorage.setItem(STORAGE_KEY_MONTHLY, JSON.stringify(updated));
   };
@@ -60,27 +61,34 @@ const App: React.FC = () => {
     localStorage.setItem(STORAGE_KEY_SAVINGS, JSON.stringify(updated));
   };
 
-  // Electricity Save
+  // ⚡ Save electricity (EM2) — merge, DO NOT overwrite anything
   const handleSaveElectricity = useCallback(
     (em2Amount: number, record: MonthlyRecord) => {
       setMonthlyData((prev) => {
         const monthKey = record.month;
-        const existing = prev[monthKey] || {};
+        const existing = prev[monthKey] || { month: monthKey };
 
         const updated: MonthlyRecord = {
           ...existing,
           ...record,
           expenses: {
-            ...existing.expenses,
+            ...(existing.expenses || {}),
+            ...(record.expenses || {}),
             saved_em2_eur: em2Amount,
-            fixed_expenses:
-              existing.expenses?.fixed_expenses || {
-                credit_eur: 0,
-                phone_eur: 0,
-                internet_eur: 0,
-              },
-            additional_expenses:
-              existing.expenses?.additional_expenses || [],
+
+            fixed_expenses: {
+              ...(existing.expenses?.fixed_expenses || {}),
+            },
+
+            additional_expenses: [
+              ...(existing.expenses?.additional_expenses || []),
+            ],
+          },
+          incomes: existing.incomes || [],
+          results: existing.results || {},
+          inputs: existing.inputs || {},
+          meta: existing.meta || {
+            generated_at: new Date().toISOString(),
           },
         };
 
@@ -92,37 +100,41 @@ const App: React.FC = () => {
     []
   );
 
-  // Monthly Expenses Save
+  // 💰 Save Monthly Expenses — MERGE, DO NOT overwrite
   const handleSaveExpenses = useCallback((expensesData: any) => {
     setMonthlyData((prev) => {
       const monthKey = getCurrentMonthBulgarian();
-
-      const existing = prev[monthKey] || {
-        month: monthKey,
-        tab: "expenses",
-        meta: { generated_at: new Date().toISOString() },
-        inputs: {
-          old_t1: 0,
-          new_t1: 0,
-          old_t2: 0,
-          new_t2: 0,
-          day_price_with_vat: 0,
-          night_price_with_vat: 0,
-          invoice_total: 0,
-        },
-        results: {
-          cons_t1_kwh: 0,
-          cons_t2_kwh: 0,
-          total_cons_em1_kwh: 0,
-          cost_em1_eur: 0,
-          em2_remainder_eur: 0,
-        },
-      };
+      const existing = prev[monthKey] || { month: monthKey };
 
       const updated: MonthlyRecord = {
         ...existing,
-        expenses: expensesData,
+
+        expenses: {
+          ...(existing.expenses || {}),
+
+          fixed_expenses: {
+            ...(existing.expenses?.fixed_expenses || {}),
+            ...(expensesData.fixed_expenses || {}),
+          },
+
+          additional_expenses: [
+            ...(existing.expenses?.additional_expenses || []),
+            ...(expensesData.additional_expenses || []),
+          ],
+
+          saved_em2_eur:
+            expensesData.saved_em2_eur ??
+            existing.expenses?.saved_em2_eur ??
+            null,
+        },
+
         incomes: existing.incomes || [],
+        results: existing.results || {},
+        inputs: existing.inputs || {},
+        meta:
+          existing.meta || {
+            generated_at: new Date().toISOString(),
+          },
       };
 
       const newData = { ...prev, [monthKey]: updated };
@@ -131,19 +143,17 @@ const App: React.FC = () => {
     });
   }, []);
 
-  // Global Savings Save
-  const handleUpdateGlobalSavings = useCallback(
-    (newSavings: IncomeItem[]) => {
-      setGlobalSavings(newSavings);
-      saveSavingsToStorage(newSavings);
-    },
-    []
-  );
+  // 🟢 Global savings
+  const handleUpdateGlobalSavings = useCallback((newSavings: IncomeItem[]) => {
+    setGlobalSavings(newSavings);
+    saveSavingsToStorage(newSavings);
+  }, []);
 
   const currentMonthRecord = monthlyData[currentMonth];
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
+      {/* HEADER */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
@@ -156,60 +166,65 @@ const App: React.FC = () => {
               </span>
             </div>
 
+            {/* NAVIGATION */}
             <nav className="flex space-x-1 sm:space-x-2 overflow-x-auto no-scrollbar py-2">
+              {/* Monthly */}
               <button
                 onClick={() => setActiveTab("monthly")}
-                className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium whitespace-nowrap ${
+                className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm ${
                   activeTab === "monthly"
                     ? "bg-blue-50 text-blue-700"
-                    : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+                    : "text-slate-500 hover:text-slate-700"
                 }`}
               >
                 <Calendar className="w-4 h-4" />
-                <span className="hidden sm:inline">Месечни разходи</span>
-                <span className="sm:hidden">Разходи</span>
+                Месечни
               </button>
 
+              {/* Electricity */}
               <button
                 onClick={() => setActiveTab("electricity")}
-                className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium whitespace-nowrap ${
+                className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm ${
                   activeTab === "electricity"
                     ? "bg-indigo-50 text-indigo-700"
-                    : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+                    : "text-slate-500 hover:text-slate-700"
                 }`}
               >
                 <Zap className="w-4 h-4" />
-                <span>ТОК</span>
+                ТОК
               </button>
 
+              {/* Reports */}
               <button
                 onClick={() => setActiveTab("reports")}
-                className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium whitespace-nowrap ${
+                className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm ${
                   activeTab === "reports"
                     ? "bg-purple-50 text-purple-700"
-                    : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+                    : "text-slate-500 hover:text-slate-700"
                 }`}
               >
                 <PieChart className="w-4 h-4" />
-                <span>Отчети</span>
+                Отчети
               </button>
 
+              {/* Savings */}
               <button
                 onClick={() => setActiveTab("savings")}
-                className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium whitespace-nowrap ${
+                className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm ${
                   activeTab === "savings"
                     ? "bg-emerald-50 text-emerald-700"
-                    : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+                    : "text-slate-500 hover:text-slate-700"
                 }`}
               >
                 <PiggyBank className="w-4 h-4" />
-                <span>Спестявания</span>
+                Спестявания
               </button>
             </nav>
           </div>
         </div>
       </header>
 
+      {/* MAIN CONTENT */}
       <main className="flex-1 max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
         {activeTab === "monthly" && (
           <MonthlyExpensesTab
@@ -236,10 +251,11 @@ const App: React.FC = () => {
         )}
       </main>
 
+      {/* FOOTER */}
       <footer className="bg-white border-t border-slate-200 mt-auto">
-        <div className="max-w-6xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
+        <div className="max-w-6xl mx-auto px-4 py-6">
           <p className="text-center text-xs text-slate-400">
-            Home Budget Application © {new Date().getFullYear()}
+            Home Budget © {new Date().getFullYear()}
           </p>
         </div>
       </footer>
