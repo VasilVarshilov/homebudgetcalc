@@ -14,39 +14,38 @@ const STORAGE_KEY_MONTHLY = 'HomeBudget_Data';
 const STORAGE_KEY_SAVINGS = 'HomeBudget_GlobalSavings';
 
 const App: React.FC = () => {
-  // Default to Monthly Expenses as per request
   const [activeTab, setActiveTab] = useState<Tab>('monthly');
-  const [currentMonth, setCurrentMonth] = useState('');
+  const [currentMonth, setCurrentMonth] = useState<string>(() => getCurrentMonthBulgarian());
   
-  // App-wide monthly data (internal representation)
-  const [monthlyData, setMonthlyData] = useState<Record<string, MonthlyRecord>>({});
-  
-  // Global Savings Data (Lifetime, independent of month)
-  const [globalSavings, setGlobalSavings] = useState<IncomeItem[]>([]);
-
-  useEffect(() => {
-    setCurrentMonth(getCurrentMonthBulgarian());
-    
-    // Load Monthly Data
+  // CRITICAL FIX: Load data synchronously via lazy initialization.
+  // This prevents the app from rendering with empty data and overwriting localStorage.
+  const [monthlyData, setMonthlyData] = useState<Record<string, MonthlyRecord>>(() => {
     try {
-      const storedMonthly = localStorage.getItem(STORAGE_KEY_MONTHLY);
-      if (storedMonthly) {
-        setMonthlyData(JSON.parse(storedMonthly));
-      }
+      const stored = localStorage.getItem(STORAGE_KEY_MONTHLY);
+      return stored ? JSON.parse(stored) : {};
     } catch (e) {
       console.error("Failed to load monthly data", e);
+      return {};
     }
-
-    // Load Global Savings Data
+  });
+  
+  const [globalSavings, setGlobalSavings] = useState<IncomeItem[]>(() => {
     try {
-      const storedSavings = localStorage.getItem(STORAGE_KEY_SAVINGS);
-      if (storedSavings) {
-        setGlobalSavings(JSON.parse(storedSavings));
-      }
+      const stored = localStorage.getItem(STORAGE_KEY_SAVINGS);
+      return stored ? JSON.parse(stored) : [];
     } catch (e) {
       console.error("Failed to load savings data", e);
+      return [];
     }
-  }, []);
+  });
+
+  // Keep month updated if app stays open
+  useEffect(() => {
+    const month = getCurrentMonthBulgarian();
+    if (month !== currentMonth) {
+      setCurrentMonth(month);
+    }
+  }, [currentMonth]);
 
   const saveMonthlyToStorage = (updatedData: Record<string, MonthlyRecord>) => {
     localStorage.setItem(STORAGE_KEY_MONTHLY, JSON.stringify(updatedData));
