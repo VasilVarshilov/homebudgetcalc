@@ -24,27 +24,31 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>("monthly");
   const [currentMonth, setCurrentMonth] = useState("");
 
-  const [monthlyData, setMonthlyData] = useState<
-    Record<string, MonthlyRecord>
-  >({});
+  const [monthlyData, setMonthlyData] =
+    useState<Record<string, MonthlyRecord>>({});
   const [globalSavings, setGlobalSavings] = useState<IncomeItem[]>([]);
 
   //
-  // LOAD FROM STORAGE
+  // LOAD FROM STORAGE (SAFE)
   //
   useEffect(() => {
-    setCurrentMonth(getCurrentMonthBulgarian());
+    const month = getCurrentMonthBulgarian();
+    setCurrentMonth(month);
 
     try {
       const stored = localStorage.getItem(STORAGE_KEY_MONTHLY);
-      if (stored) setMonthlyData(JSON.parse(stored));
+      if (stored) {
+        setMonthlyData(JSON.parse(stored));
+      }
     } catch (e) {
       console.error("Failed to load monthly data", e);
     }
 
     try {
       const saved = localStorage.getItem(STORAGE_KEY_SAVINGS);
-      if (saved) setGlobalSavings(JSON.parse(saved));
+      if (saved) {
+        setGlobalSavings(JSON.parse(saved));
+      }
     } catch (e) {
       console.error("Failed to load savings", e);
     }
@@ -59,8 +63,7 @@ const App: React.FC = () => {
   };
 
   //
-  // SAVE ELECTRICITY (EM2)
-  // НЕ ПРЕЗАПИСВА НИЩО!
+  // SAVE ELECTRICITY (МЕРДЖВА — НЕ ЗАНУЛЯВА НИЩО)
   //
   const handleSaveElectricity = useCallback(
     (em2Amount: number, record: MonthlyRecord) => {
@@ -73,7 +76,6 @@ const App: React.FC = () => {
           ...record,
           expenses: {
             ...(existing.expenses || {}),
-            ...(record.expenses || {}),
 
             saved_em2_eur: em2Amount,
 
@@ -104,7 +106,7 @@ const App: React.FC = () => {
   );
 
   //
-  // SAVE EXPENSES — MERGE + НЕ ПРЕЗАПИСВА НИЩО
+  // SAVE EXPENSES (НОВА ЛОГИКА) → НИКОГА не добавя още веднъж старите !!!
   //
   const handleSaveExpenses = useCallback((expensesData: any) => {
     setMonthlyData((prev) => {
@@ -122,10 +124,8 @@ const App: React.FC = () => {
             ...(expensesData.fixed_expenses || {}),
           },
 
-          additional_expenses: [
-            ...(existing.expenses?.additional_expenses || []),
-            ...(expensesData.additional_expenses || []),
-          ],
+          // 🚀 НЕ ДОБАВЯ ПОВТОРНО! ЗАМЕСТВА със списъка, който MonthlyExpensesTab подава
+          additional_expenses: expensesData.additional_expenses ?? existing.expenses?.additional_expenses ?? [],
 
           saved_em2_eur:
             expensesData.saved_em2_eur ??
@@ -226,7 +226,7 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      {/* MAIN CONTENT */}
+      {/* MAIN */}
       <main className="flex-1 max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
         {activeTab === "monthly" && (
           <MonthlyExpensesTab
